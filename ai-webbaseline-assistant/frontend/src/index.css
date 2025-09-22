@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+html, body, #root {
+  height: 100%;
+}
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+.container {
+  @apply max-w-5xl mx-auto px-4;
+}
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-100 p-5;
+}
+.btn {
+  @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors;
+}
+.btn-primary {
+  @apply bg-primary text-white hover:bg-primary-700;
+}
+.btn-secondary {
+  @apply bg-gray-100 text-gray-900 hover:bg-gray-200;
+}
+.input {
+  @apply w-full rounded-lg border border-gray-200 p-3 focus:outline-none focus:ring-2 focus:ring-primary/50;
+}
+.textarea {
+  @apply w-full min-h-[160px] rounded-lg border border-gray-200 p-3 focus:outline-none focus:ring-2 focus:ring-primary/50;
+}
+.badge {
+  @apply inline-flex items-center rounded-full bg-primary/10 text-primary px-3 py-1 text-sm font-medium;
+}

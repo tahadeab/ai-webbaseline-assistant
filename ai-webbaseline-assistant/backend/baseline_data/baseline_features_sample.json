@@ -1,0 +1,24 @@
+{
+  "features": [
+    {
+      "name": "CSS Container Queries",
+      "summary": "Container Queries allow styling based on the size of a container rather than viewport. Support varies across browsers; use feature detection and polyfills.",
+      "support": {
+        "chrome": "95+",
+        "firefox": "not supported",
+        "safari": "16+"
+      },
+      "mdn_url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Container_Queries"
+    },
+    {
+      "name": "Intersection Observer",
+      "summary": "API to detect visibility of elements within viewport. Widely supported.",
+      "support": {
+        "chrome": "51+",
+        "firefox": "55+",
+        "safari": "12+"
+      },
+      "mdn_url": "https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API"
+    }
+  ]
+}

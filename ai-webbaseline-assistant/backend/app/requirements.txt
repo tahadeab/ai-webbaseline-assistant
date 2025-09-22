@@ -1,0 +1,12 @@
+fastapi>=0.110
+uvicorn[standard]>=0.23
+pydantic>=2
+httpx>=0.24
+python-dotenv>=1.0
+
+# Optional ML (not required at runtime, we fallback if missing)
+# transformers  # install manually if you want better summarization
+
+# File parsing
+pypdf>=4
+python-docx>=1

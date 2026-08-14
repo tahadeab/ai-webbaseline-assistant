@@ -1,268 +1,276 @@
-from fastapi import FastAPI, UploadFile, File, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from __future__ import annotations
+
 import json
-from pathlib import Path
 import logging
-from typing import List, Optional
 import os
-import re
 import random
+import re
+import uuid
+from pathlib import Path
+from typing import List, Optional
+
 import requests
+from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
-except Exception:
+except Exception:  # pragma: no cover
     pass
 
-# Lightweight NLP without heavy external services
 try:
-    from transformers import pipeline  # optional; app works without it
+    from transformers import pipeline
 except Exception:  # pragma: no cover
     pipeline = None
 
-app = FastAPI(title="AI Study Assistant")
+logger = logging.getLogger("uvicorn.error")
 
-# CORS for local dev (Vite default port 5173)
+app = FastAPI(
+    title="AI Web Baseline Assistant API",
+    version="1.0.0",
+    description="Study tools and Baseline feature discovery for modern web developers.",
+)
+
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
-logger = logging.getLogger("uvicorn.error")
+BASELINE_FILE = Path(__file__).resolve().parents[1] / "baseline_data" / "baseline_features_sample.json"
+UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_CONTENT_CHARS = 100_000
 
-BASELINE_FILE = Path(__file__).resolve().parents[1] / 'baseline_data' / 'baseline_features_sample.json'
-UPLOAD_DIR = Path(__file__).resolve().parents[1] / 'uploads'
-UPLOAD_DIR.mkdir(exist_ok=True)
-
-# Lazy-load summarization pipeline (t5-small for lighter footprint)
 _summarizer = None
+
+
+def get_baseline_data() -> dict:
+    try:
+        return json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error("Unable to read Baseline data: %s", exc)
+        return {"features": []}
+
+
+def split_sentences(text: str) -> List[str]:
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text.replace("\r", " "))
+        if sentence.strip()
+    ]
+
+
 def get_summarizer():
     global _summarizer
     if _summarizer is None and pipeline is not None:
         try:
             _summarizer = pipeline("summarization", model="t5-small", tokenizer="t5-small")
-        except Exception as e:
-            logger.error(f"Failed to load summarization model: {e}")
-            _summarizer = None
-    return _summarizer
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Local summarizer unavailable: %s", exc)
+            _summarizer = False
+    return _summarizer if _summarizer is not False else None
 
-def summarize_via_hf_api(text: str, max_length: int = 200) -> Optional[str]:
+
+def summarize_via_hf_api(text: str, max_length: int) -> Optional[str]:
     token = os.getenv("HUGGINGFACE_API_TOKEN")
     model = os.getenv("HUGGINGFACE_MODEL", "facebook/bart-large-cnn")
     if not token:
         return None
     try:
-        headers = {"Authorization": f"Bearer {token}"}
-        payload = {"inputs": text, "parameters": {"max_length": max_length, "min_length": 30, "do_sample": False}}
-        url = f"https://api-inference.huggingface.co/models/{model}"
-        r = requests.post(url, headers=headers, json=payload, timeout=60)
-        r.raise_for_status()
-        data = r.json()
-        # API returns list of dicts with 'summary_text'
-        if isinstance(data, list) and data and 'summary_text' in data[0]:
-            return data[0]['summary_text']
-        # Some models return 'generated_text'
-        if isinstance(data, list) and data and 'generated_text' in data[0]:
-            return data[0]['generated_text']
-    except Exception as e:
-        logger.warning(f"HF summarization failed: {e}")
+        response = requests.post(
+            f"https://api-inference.huggingface.co/models/{model}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"inputs": text, "parameters": {"max_length": max_length, "min_length": 20, "do_sample": False}},
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, list) and data:
+            return data[0].get("summary_text") or data[0].get("generated_text")
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        logger.warning("Cloud summarization failed: %s", exc)
     return None
 
+
 class DocumentIn(BaseModel):
-    content: str
-    title: str = "Untitled"
-    max_length: int = 200
+    content: str = Field(min_length=1, max_length=MAX_CONTENT_CHARS)
+    title: str = Field(default="Untitled", max_length=200)
+    max_length: int = Field(default=200, ge=40, le=500)
+
 
 class FeatureQuery(BaseModel):
-    feature: str
+    feature: str = Field(min_length=1, max_length=120)
+
+
+class FlashcardsIn(BaseModel):
+    content: str = Field(min_length=1, max_length=MAX_CONTENT_CHARS)
+    count: int = Field(default=6, ge=1, le=20)
+
+
+class QuizIn(BaseModel):
+    content: str = Field(min_length=1, max_length=MAX_CONTENT_CHARS)
+    tf_count: int = Field(default=3, ge=0, le=10)
+    mcq_count: int = Field(default=3, ge=0, le=10)
+
 
 class Flashcard(BaseModel):
     question: str
     answer: str
 
+
 class QuizQuestion(BaseModel):
-    type: str  # "tf" or "mcq"
+    type: str
     question: str
     options: Optional[List[str]] = None
     answer: str
 
+
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "ai-webbaseline-assistant", "version": app.version}
+
+
+@app.get("/api/features")
+async def list_features():
+    features = get_baseline_data().get("features", [])
+    return {"features": [{"name": item.get("name"), "mdn_url": item.get("mdn_url")} for item in features]}
+
 
 @app.post("/api/documents/")
 async def create_document(payload: DocumentIn):
-    text = (payload.content or "").strip()
-    if not text:
-        return {"error": "empty content"}
-    # Try HF API first, then local model, then naive
-    try:
-        summary = summarize_via_hf_api(text, max_length=min(256, payload.max_length))
-        if not summary:
-            summarizer = get_summarizer()
-            if summarizer is not None:
-                summary_chunks = summarizer(text, max_length=min(256, payload.max_length), min_length=30, do_sample=False)
-                summary = summary_chunks[0]['summary_text']
-            else:
-                raise RuntimeError("summarizer unavailable")
-    except Exception as e:
-        logger.warning(f"Summarization fallback due to: {e}")
-        # Naive summary by sentences
-        sentences = [s.strip() for s in text.replace("\n", " ").split('.') if s.strip()]
-        summary = '. '.join(sentences[:2]) + ('.' if sentences else '')
-    return {"title": payload.title, "content": payload.content, "summary": summary}
+    text = payload.content.strip()
+    summary = summarize_via_hf_api(text, payload.max_length)
+    if not summary:
+        summarizer = get_summarizer()
+        if summarizer is not None:
+            try:
+                result = summarizer(text[:12_000], max_length=payload.max_length, min_length=20, do_sample=False)
+                summary = result[0]["summary_text"]
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Local summarization failed: %s", exc)
+    if not summary:
+        sentences = split_sentences(text)
+        summary = " ".join(sentences[:3])[:2_000]
+    return {"title": payload.title, "summary": summary, "word_count": len(text.split())}
+
 
 @app.post("/api/feature-info")
-async def feature_info(q: FeatureQuery):
-    try:
-        data = json.loads(BASELINE_FILE.read_text(encoding='utf-8'))
-    except Exception as e:
-        logger.error(f"Failed reading baseline file: {e}")
-        return {"error": "baseline data not found"}
-    for f in data.get("features", []):
-        if f.get("name", "").lower() == q.feature.lower():
-            lines = f.get("summary", "").split('.')
-            quiz = []
-            for l in lines[:3]:
-                if l.strip():
-                    quiz.append({"question": f"What is a key point about {f.get('name') }?", "answer": l.strip()})
-            return {
-                "feature": f.get("name"),
-                "support_summary": f.get("summary"),
-                "quiz": quiz,
-                "support": f.get("support"),
-                "mdn_url": f.get("mdn_url")
-            }
-    return {"error": "feature not found"}
+async def feature_info(query: FeatureQuery):
+    requested = query.feature.strip().lower()
+    features = get_baseline_data().get("features", [])
+    exact = next((item for item in features if item.get("name", "").lower() == requested), None)
+    match = exact or next((item for item in features if requested in item.get("name", "").lower()), None)
+    if not match:
+        suggestions = [item.get("name") for item in features if any(word in item.get("name", "").lower() for word in requested.split())]
+        return {"error": "Feature not found", "suggestions": suggestions[:5]}
+    quiz = [
+        {"question": f"What should a developer remember about {match.get('name')}?", "answer": sentence}
+        for sentence in split_sentences(match.get("summary", ""))[:3]
+    ]
+    return {
+        "feature": match.get("name"),
+        "support_summary": match.get("summary", ""),
+        "support": match.get("support", {}),
+        "mdn_url": match.get("mdn_url"),
+        "quiz": quiz,
+    }
 
-# Flashcards endpoint
-class FlashcardsIn(BaseModel):
-    content: str
-    count: int = 5
 
 @app.post("/api/flashcards")
 async def generate_flashcards(payload: FlashcardsIn):
-    text = (payload.content or "").strip()
-    if not text:
-        return {"flashcards": []}
-    sentences = [s.strip() for s in text.replace("\n", " ").split('.') if s.strip()]
-    cards: List[Flashcard] = []
-    for s in sentences[: max(1, payload.count)]:
-        # Simple heuristic: create Q/A from sentence
-        q = f"What is the key idea?"
-        a = s
-        cards.append(Flashcard(question=q, answer=a))
-    return {"flashcards": [c.dict() for c in cards]}
+    sentences = split_sentences(payload.content.strip())
+    cards = [
+        Flashcard(question=f"What is the key idea in this statement?", answer=sentence)
+        for sentence in sentences[: payload.count]
+    ]
+    return {"flashcards": [card.model_dump() for card in cards]}
 
-# Quiz endpoint (TF + improved MCQ)
-class QuizIn(BaseModel):
-    content: str
-    tf_count: int = 3
-    mcq_count: int = 2
 
 @app.post("/api/quiz")
 async def generate_quiz(payload: QuizIn):
-    text = (payload.content or "").strip()
-    if not text:
-        return {"questions": []}
-    sentences = [s.strip() for s in re.split(r"[\.\!\?]", text.replace("\n", " ")) if s.strip()]
+    text = payload.content.strip()
+    sentences = split_sentences(text)
     questions: List[QuizQuestion] = []
-    # True/False
-    for s in sentences[: payload.tf_count]:
-        questions.append(QuizQuestion(type="tf", question=f"True or False: {s}", answer="True"))
-    # Improved MCQ: pick keywords (longer words, capitalized or frequent), mask them, choose distractors from corpus
-    words_all = re.findall(r"[A-Za-z\u0600-\u06FF]+", text)  # support English/Arabic letters
-    freq = {}
-    for w in words_all:
-        key = w.lower()
-        if len(key) >= 5:
-            freq[key] = freq.get(key, 0) + 1
-    # candidate keywords sorted by frequency and length
-    candidates = sorted(freq.keys(), key=lambda k: (freq[k], len(k)), reverse=True)
-    # Build pool for distractors (unique words similar length)
-    unique_pool = list({w.lower() for w in words_all if len(w) >= 4})
-    random.shuffle(unique_pool)
-    mcq_generated = 0
-    for s in sentences:
-        if mcq_generated >= payload.mcq_count:
-            break
-        tokens = re.findall(r"\w+|\W+", s)
-        # find first candidate present in sentence
-        target = None
-        for c in candidates:
-            if re.search(rf"\b{re.escape(c)}\b", s, flags=re.IGNORECASE):
-                target = c
-                break
-        if not target:
-            # fallback to a mid token
-            words = [t for t in tokens if re.match(r"\w+", t)]
-            if len(words) > 6:
-                target = words[len(words)//2].lower()
-            else:
-                continue
-        answer = target
-        # mask in sentence
-        masked = re.sub(rf"\b{re.escape(target)}\b", "____", s, flags=re.IGNORECASE)
-        # pick distractors of similar length and not equal to answer
-        distractors = [w for w in unique_pool if w != answer and abs(len(w) - len(answer)) <= 2]
-        distractors = distractors[:10]
-        if answer in distractors:
-            distractors.remove(answer)
-        # ensure 3 distractors
-        while len(distractors) < 3 and unique_pool:
-            cand = unique_pool.pop()
-            if cand != answer:
-                distractors.append(cand)
-        options = list({answer, *distractors[:3]})
-        random.shuffle(options)
-        questions.append(QuizQuestion(type="mcq", question=masked, options=options, answer=answer))
-        mcq_generated += 1
-    return {"questions": [q.dict() for q in questions]}
+    for sentence in sentences[: payload.tf_count]:
+        questions.append(QuizQuestion(type="tf", question=sentence, options=["True", "False"], answer="True"))
 
-# File upload (txt, pdf, docx)
+    words = re.findall(r"[A-Za-z][A-Za-z-]{3,}", text)
+    frequencies = {word.lower(): sum(1 for item in words if item.lower() == word.lower()) for word in words}
+    candidates = sorted(set(frequencies), key=lambda item: (frequencies[item], len(item)), reverse=True)
+    pool = list(set(word.lower() for word in words))
+    random.shuffle(pool)
+    generated = 0
+    for sentence in sentences:
+        if generated >= payload.mcq_count:
+            break
+        target = next((word for word in candidates if re.search(rf"\b{re.escape(word)}\b", sentence, re.I)), None)
+        if not target:
+            continue
+        masked = re.sub(rf"\b{re.escape(target)}\b", "____", sentence, flags=re.I)
+        distractors = [word for word in pool if word != target and abs(len(word) - len(target)) <= 3][:3]
+        options = list(dict.fromkeys([target, *distractors]))
+        if len(options) < 2:
+            continue
+        random.shuffle(options)
+        questions.append(QuizQuestion(type="mcq", question=masked, options=options, answer=target))
+        generated += 1
+    return {"questions": [question.model_dump() for question in questions]}
+
+
 def _read_txt(path: Path) -> str:
-    try:
-        return path.read_text(encoding='utf-8', errors='ignore')
-    except Exception:
-        return path.read_text(errors='ignore')
+    return path.read_text(encoding="utf-8", errors="ignore")
+
 
 def _read_pdf(path: Path) -> str:
     try:
         from pypdf import PdfReader
-        reader = PdfReader(str(path))
-        text = []
-        for page in reader.pages:
-            text.append(page.extract_text() or "")
-        return "\n".join(text)
-    except Exception as e:
-        logger.error(f"PDF parse error: {e}")
+        return "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
+    except Exception as exc:
+        logger.warning("PDF parsing failed: %s", exc)
         return ""
+
 
 def _read_docx(path: Path) -> str:
     try:
         import docx
-        doc = docx.Document(str(path))
-        return "\n".join([p.text for p in doc.paragraphs])
-    except Exception as e:
-        logger.error(f"DOCX parse error: {e}")
+        return "\n".join(paragraph.text for paragraph in docx.Document(str(path)).paragraphs)
+    except Exception as exc:
+        logger.warning("DOCX parsing failed: %s", exc)
         return ""
+
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    suffix = Path(file.filename).suffix.lower()
-    temp_path = UPLOAD_DIR / file.filename
-    with temp_path.open("wb") as f:
-        f.write(await file.read())
-    if suffix in (".txt", ".md"):
-        content = _read_txt(temp_path)
-    elif suffix in (".pdf",):
-        content = _read_pdf(temp_path)
-    elif suffix in (".docx",):
-        content = _read_docx(temp_path)
-    else:
-        return {"error": "unsupported file type"}
-    return {"filename": file.filename, "content": content[:100000]}
+    filename = Path(file.filename or "document.txt").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".txt", ".md", ".pdf", ".docx"}:
+        return {"error": "Unsupported file type. Use TXT, Markdown, PDF, or DOCX."}
+    content_bytes = await file.read()
+    if len(content_bytes) > MAX_UPLOAD_BYTES:
+        return {"error": "File is too large. Maximum size is 10 MB."}
+    temporary_path = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
+    temporary_path.write_bytes(content_bytes)
+    try:
+        if suffix in {".txt", ".md"}:
+            content = _read_txt(temporary_path)
+        elif suffix == ".pdf":
+            content = _read_pdf(temporary_path)
+        else:
+            content = _read_docx(temporary_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return {"filename": filename, "content": content[:MAX_CONTENT_CHARS], "word_count": len(content.split())}

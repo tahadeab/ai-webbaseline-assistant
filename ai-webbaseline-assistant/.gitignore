@@ -1,0 +1,20 @@
+# Python
+backend/.venv/
+backend/**/__pycache__/
+*.py[cod]
+.env
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+*.log
+
+# Runtime uploads
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

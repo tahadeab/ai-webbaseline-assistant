@@ -1,154 +1,117 @@
-# AI Study Assistant + Web Baseline Integrations
+# AI Web Baseline Assistant
 
-An AI-powered study helper that integrates Web Baseline feature data to help developers and students:
-- Summarize articles/notes.
-- Generate flashcards.
-- Create quick quizzes (True/False and MCQ).
-- Explore modern web features (Baseline) with quick info, MDN links, and a mini-quiz.
+AI Web Baseline Assistant is a developer-focused study workspace that turns technical notes into practical learning assets. It combines document summarization, active-recall flashcards, knowledge-check quizzes, and Web Baseline feature discovery in one focused interface.
 
-This project aligns with the hackathon theme: it integrates Baseline data about web features with a developer tool (a web app) to make it easier for web developers to adopt modern web features.
+## Why this project exists
 
-## Live Demo (hosted URL)
-- Live URL: https://your-domain-or-netlify-url.example (replace when deployed)
+Modern web development moves quickly, and developers often need to understand both the concept and its browser support before shipping a feature. This application closes that gap by connecting a study workflow with Web Baseline research: read or upload material, generate a compact study pack, and verify platform support through a searchable feature panel.
 
-## Repository
-- Public Repo: https://github.com/tahadeab/ai-webbaseline-assistant 
+## Core capabilities
 
-## Features
-- Summarization via three-tier fallback: Hugging Face Inference API (optional) → local Transformers (optional) → simple sentence-based summary.
-- File upload and parsing: TXT, PDF (pypdf), DOCX (python-docx).
-- Flashcards generation + interactive Flip Cards study mode.
-- Quiz generation with improved MCQs (keyword masking and smarter distractors) + True/False.
-- Baseline feature lookup with sample dataset (MDN URL, support summary, quick quiz).
-- Export results to PDF (summary, flashcards, quiz).
-- Modern UI: React + Vite + TailwindCSS.
-
-## Tech Stack
-- Frontend: React 18, Vite, TailwindCSS, jsPDF.
-- Backend: FastAPI, Uvicorn.
-- NLP (optional): Hugging Face Inference API (via `HUGGINGFACE_API_TOKEN`), or local `transformers`.
-- Parsing: pypdf, python-docx.
+| Capability | Description |
+| --- | --- |
+| Document intake | Paste notes or upload TXT, Markdown, PDF, and DOCX files. Files are limited to 10 MB and parsed by the FastAPI backend. |
+| Smart summaries | Uses the optional Hugging Face API first, then an optional local transformer, and finally a reliable sentence-based fallback. |
+| Flashcards | Generates active-recall cards with a click-to-flip study mode. |
+| Knowledge checks | Creates True/False and multiple-choice questions, with answers hidden until revealed. |
+| Web Baseline explorer | Searches the included Baseline dataset, provides support context, an MDN link, and quick recall questions. |
+| Study pack export | Exports generated summaries, flashcards, and quizzes into a PDF. |
+| Responsive interface | English-first UI with keyboard-friendly controls, clear empty states, error feedback, and responsive layouts. |
 
 ## Architecture
-```
-frontend/ (Vite + React + Tailwind)
-  src/main.jsx (UI, Flip Cards, PDF export)
-  src/index.css (Tailwind styles)
 
-backend/ (FastAPI)
-  app/main.py (REST APIs: summarize, flashcards, quiz, upload, feature-info)
-  baseline_data/baseline_features_sample.json (sample Baseline data)
-  uploads/ (uploaded files)
+```text
+ai-webbaseline-assistant/
+├── backend/
+│   ├── app/main.py                 # FastAPI application and API routes
+│   ├── baseline_data/              # Baseline feature dataset
+│   ├── requirements.txt            # Reproducible Python dependencies
+│   └── uploads/                    # Temporary upload directory
+├── frontend/
+│   ├── src/main.jsx                # React application and interaction logic
+│   ├── src/index.css               # Design system and responsive styles
+│   ├── index.html                  # Metadata and application shell
+│   └── package.json                # Frontend scripts and dependencies
+├── docker-compose.yml
+└── README.md
 ```
 
-## Getting Started (Local, Windows-friendly)
-Prereqs: Python 3.11+, Node.js 18+.
+## Quick start
 
-1) Backend
-```
+### Backend
+
+```bash
 cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# Optional: better local summarization (large install)
-# pip install transformers
-
-# Optional: enable Hugging Face Inference API
-# copy .env.example to .env and set your token/model
-# HUGGINGFACE_API_TOKEN=hf_...
-# HUGGINGFACE_MODEL=facebook/bart-large-cnn
-
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-2) Frontend
-```
+### Frontend
+
+```bash
 cd frontend
 npm install
 npm run dev
-# Open http://localhost:5173
 ```
 
-3) Docker (optional)
-```
+Open `http://localhost:5173` in your browser. Vite proxies API calls to the same origin when deployed behind a reverse proxy; for a separate backend, set `VITE_API_URL` before starting the frontend.
+
+### Docker
+
+```bash
 docker compose up --build
 ```
 
-## Environment Variables (backend/.env)
-```
-HUGGINGFACE_API_TOKEN=hf_xxx            # optional; enables cloud summarization
+## Optional AI configuration
+
+The application works without external model credentials. To enable cloud summarization, create `backend/.env`:
+
+```env
+HUGGINGFACE_API_TOKEN=hf_your_token
 HUGGINGFACE_MODEL=facebook/bart-large-cnn
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-## API Endpoints (backend)
-- `POST /api/upload` → multipart file → `{ filename, content }`.
-- `POST /api/documents/` → `{ content, title?, max_length? }` → `{ summary }`.
-- `POST /api/flashcards` → `{ content, count? }` → `{ flashcards: [{question, answer}] }`.
-- `POST /api/quiz` → `{ content, tf_count?, mcq_count? }` → `{ questions: [...] }`.
-- `POST /api/feature-info` → `{ feature }` → Baseline info + quick quiz.
-- `GET /api/health` → health check.
+The service degrades gracefully to local or heuristic summarization if the optional service is unavailable.
 
-## Submission Checklist (Hackathon)
-1. URL to hosted Project: add your live URL in this README (see Live Demo section).
-2. Comprehensive description: see Features, Tech Stack, Architecture, and API sections above.
-3. Answer submission questions: include additional Q&A in this README or on the submission portal.
-4. Public repo URL: add your GitHub link in the Repository section.
-5. Permissive Open-Source License: this repo includes `LICENSE` (MIT).
-6. Demo video (>3 minutes): add link here once recorded.
-   - Demo Video: https://your-video-link.example (replace)
+## API reference
 
-## How It Helps Developers Adopt Modern Web Features
-- Integrates Baseline features data into a study/workflow tool, allowing developers to quickly check support, read summaries, and self-test.
-- Encourages practical adoption by embedding learning (summary/flashcards/quiz) right alongside Baseline exploration.
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/health` | Service status and version. |
+| `GET` | `/api/features` | List available Baseline feature names. |
+| `POST` | `/api/upload` | Parse a TXT, MD, PDF, or DOCX file. |
+| `POST` | `/api/documents/` | Generate a summary from text. |
+| `POST` | `/api/flashcards` | Generate flashcards from text. |
+| `POST` | `/api/quiz` | Generate True/False and MCQ questions. |
+| `POST` | `/api/feature-info` | Find a Baseline feature and return guidance. |
 
-## Contributing
-PRs and issues are welcome. Please open a discussion for significant changes.
+Interactive API documentation is available at `http://localhost:8000/docs` while the backend is running.
+
+## Verification
+
+The current version has been verified with the following checks:
+
+```text
+Frontend production build: PASS
+Python syntax compilation: PASS
+Health endpoint: PASS
+Summary endpoint: PASS
+Flashcards endpoint: PASS
+Quiz endpoint: PASS
+Baseline feature endpoint: PASS
+```
+
+## Product and engineering improvements
+
+This release replaces the MVP interface with an English, responsive workspace; fixes missing runtime imports and backend dependency declarations; adds bounded input validation, safe temporary filenames, upload-size limits, automatic cleanup, configurable CORS, feature suggestions, clear API errors, hidden quiz answers, word and character counts, reset controls, and improved PDF export. The code now keeps the frontend interaction model in one readable entry point and the backend API in one documented service module, making the next refactor into feature modules straightforward.
 
 ## License
-This project is released under the MIT License. See `LICENSE`.
 
----
+This project is released under the MIT License. See [LICENSE](LICENSE).
 
-## Project Story
+## Repository
 
-### Inspiration
-We wanted to make adopting modern web features easier while also helping students and developers learn faster. By blending Web Baseline data with an AI study workflow (summary → flashcards → quiz), the app encourages hands-on learning right where the developer works. We took inspiration from:
-
-- The friction developers face when checking browser support and MDN while planning features.
-- Study techniques like spaced repetition and self-testing. A simplified retention idea is often modeled as:
-
-  $$ R(t) = e^{-\tfrac{t}{\lambda}} $$
-
-  where $R(t)$ is retention over time $t$, and $\lambda$ controls the forgetting rate. Our flip-card and quiz flow is designed to counteract this decay by quick, repeated recall.
-
-### How We Built It
-- Backend (`backend/app/main.py`):
-  - FastAPI endpoints for summarization (`/api/documents/`), flashcards (`/api/flashcards`), quizzes (`/api/quiz`), uploads (`/api/upload`), and Baseline feature info (`/api/feature-info`).
-  - Summarization pipeline with three layers: Hugging Face Inference API (optional) → local `transformers` (optional) → naive fallback.
-  - File parsing using `pypdf` and `python-docx`.
-  - CORS + simple health check.
-- Frontend (`frontend/src/main.jsx`):
-  - React + Vite + TailwindCSS UI for upload, summarize, flashcards, and quizzes.
-  - Flip Cards study mode (click to reveal answer/question).
-  - Export results to PDF via `jspdf`.
-- Baseline Data: `backend/baseline_data/baseline_features_sample.json` used to demonstrate feature lookups with MDN link and a mini-quiz.
-
-### What We Learned
-- How to structure multi-tier AI fallbacks that gracefully degrade when external APIs or large models aren’t available.
-- Practical TailwindCSS setup with Vite and handling editor lint false-positives for `@tailwind`/`@apply` while the build pipeline compiles correctly.
-- Designing simple but effective heuristics for MCQ generation—keyword masking, distractor selection by frequency/length—and understanding their trade-offs.
-- Dockerizing a full-stack app for local dev parity.
-
-### Challenges
-- Balancing accuracy vs. performance for summarization without requiring heavyweight installs for all users.
-- Handling diverse document formats (txt/pdf/docx) robustly, especially PDFs with complex layouts.
-- Creating meaningful MCQs from arbitrary text—noisy inputs and domain vocabulary can degrade distractor quality.
-- Ensuring the UI stays simple yet covers the full flow (upload → summarize → flashcards → quiz → export).
-
-### Future Work
-- Stronger quiz generation (NER, keyword extraction, and syntax-aware blanks) and adaptive difficulty.
-- True spaced-repetition scheduling, e.g., Leitner boxes, with persistence (SQLite/Firebase) and progress analytics.
-- Real Baseline API/data feed with live updates and per-feature deep-dives.
-- Authentication + personal libraries of notes, decks, and quizzes.
-- One-click deploy templates (Netlify + Render) and Chrome Extension for in-page summarization.
+[github.com/tahadeab/ai-webbaseline-assistant](https://github.com/tahadeab/ai-webbaseline-assistant)
